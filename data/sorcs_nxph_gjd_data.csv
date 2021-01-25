@@ -1,0 +1,13 @@
+﻿slide1,slide2,slide3,slide4,slide5,slide6,slide7,slide8,slide9,slide10,slide11,slide12,slide13,slide14,slide15,slide16,mli_ident,gjd_pos,position
+18,2,18,28,16,42,14,18,4,15,16,19,30,17,44,17,nxph,FALSE,inner
+29,5,20,25,32,44,19,29,5,34,18,21,27,28,44,31,nxph,FALSE,middle
+16,4,9,29,21,15,10,23,3,20,10,10,27,18,14,23,nxph,FALSE,distal
+63,7,35,65,36,46,30,39,7,36,31,35,66,59,44,34,sorcs,TRUE,inner
+38,16,33,39,54,22,37,48,16,55,33,35,40,34,22,48,sorcs,TRUE,middle
+10,5,18,36,20,16,25,24,5,19,27,18,34,11,16,28,sorcs,TRUE,distal
+0,1,2,0,2,1,0,0,1,2,1,0,1,0,1,0,sorcs,FALSE,inner
+6,0,7,8,9,5,5,6,0,4,5,8,7,5,4,0,sorcs,FALSE,middle
+5,1,7,11,6,9,6,5,1,5,7,7,11,5,8,1,sorcs,FALSE,distal
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,nxph,TRUE,inner
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,nxph,TRUE,middle
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,nxph,TRUE,distal
