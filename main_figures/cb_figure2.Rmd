@@ -1,0 +1,285 @@
+---
+title: "Figure 2: Characterization of spatial variation and patterning"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this document, we reproduce panels from Figure 2 of our cerebellar cortex transcriptomic atlas manuscript. 
+
+## Load utility functions and data
+
+```{r load, results='hide', message=F, warning=F}
+library(Seurat)
+# v2.3.4
+library(ggplot2)
+
+# Utility functions
+source('../src/fig2_utils.R')
+
+```
+
+We first load annotated adult mouse cerebellar cortex data. We can retrieve this in raw count format from [GEO](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE165371) (cb_adult_mouse tar). Download and expand this directory and copy the files into the `data` directory of this repo. 
+
+``` {r data, eval=F}
+# Read in full dataset (as mtx or RDS file)
+# Raw counts can be downloaded from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE165371
+# (cb_adult_mouse)
+# Place in data directory
+counts_cb = readMM('../data/cb_adult_mouse.mtx.gz')
+barcodes_cb = readLines('../data/cb_adult_mouse_barcodes.txt')
+genes_cb = readLines('../data/cb_adult_mouse_genes.txt')
+
+row.names(counts_cb) = genes_cb
+colnames(counts_cb) = barcodes_cb
+
+# Create Seurat object if reading in raw data
+full_cb = CreateSeuratObject(raw.data = counts_cb)
+```
+
+Alternatively, we can download a Seurat object with UMAP representation stored directly from the Single Cell Portal [study](https://singlecell.broadinstitute.org/single_cell/study/SCP795). Download the `cb_annotated_object.RDS` object from the Download tab of the study and copy into the `data` directory. (Note that you will have to sign into SCP in order to access the Download tab.)
+
+``` {r data_obj}
+# Seurat object can be downloaded from SCP
+# place in data directory
+full_cb = readRDS('../data/cb_annotated_object.RDS')
+```
+
+We add in the cluster and subcluster annotations. This also includes additional metadata like sample sex. (Note that the SCP object also contains these annotations.)
+
+```{r metadata}
+# read in cluster metadata (available in data directory)
+cluster_metadata = read.csv('../data/cluster_metadata.csv', header = T, row.names = 1)
+full_cb@meta.data = cluster_metadata
+
+# also read in metadata corresponding to object with granule cells downsampled to 60k
+cluster_metadata_ds = read.csv('../data/cluster_metadata_ds.csv', header = T, row.names = 1,
+                               stringsAsFactors = F)
+```
+
+```{r preprocess}
+# split up by analyses 
+cluster_metadata_ds[['analysis_cluster']] = sapply(cluster_metadata_ds$cluster, function(x) {
+  if (x %in% c('OPC', 'ODC')) {
+    return('OPC/ODC')
+  } else if (x %in% c('PLI', 'MLI1', 'MLI2')) {
+    return('MLI/PLI')
+  } else if (x %in% c('Macrophages', 'Microglia')){
+    return('Microglia')
+  } else if (x %in% c('Choroid', 'Ependymal')) {
+    return('Choroid')
+  } else if (x %in% c('Dcn_Fibroblasts', 'Endothelial_mural', 'Endothelial_stalk')) {
+    return('Endothelial/Fibroblasts')
+  } else {
+    return(x)
+  }
+})
+
+cluster_metadata_ds[['lob_comp_cluster']] = sapply(cluster_metadata_ds$subcluster, function(x) {
+  if (x %in% c('PLI_1', 'PLI_2', 'PLI_3')) {
+    return('PLI')
+  } else {
+    return(x)
+  }
+})
+cluster_metadata_ds$lob_comp_cluster = factor(cluster_metadata_ds$lob_comp_cluster)
+cluster_metadata_ds$analysis_cluster = factor(cluster_metadata_ds$analysis_cluster)
+```
+
+```{r polygons}
+# Prepare cerebellar cartoon polygons for plotting later panels
+# Lobule coordinates available in data directory
+coords_full = c('coordsI_half.csv',  'coordsII_half.csv', 'coordsIII_half.csv', 
+                'coordscul_half.csv', 'coordsVI_half.csv', 'coordsVII_half.csv',
+                'coordsVIII_half.csv', 'coordsIX_half.csv', 'coordsX_half.csv',
+                'coordsan12.csv', 'coordsan22.csv', 'coordsprm2.csv', 
+                'coordssim2.csv', 'coordscop2.csv', 'coordsf2.csv', 
+                'coordspf2.csv')
+
+coords_full = paste0('../data/coords/', coords_full)
+
+coords_names = c('I', 'II', 'III', 'CUL', 'VI', 'VII', 'VIII', 'IX', 'X',
+                 'AN1', 'AN2', 'PRM', 'SIM', 'COP', 'F', 'PF')
+
+SPs = generate_SPs(coords_full, coords_names)
+
+```
+
+## Panel A
+
+Spatial divergence computation and plotting.
+
+``` {r compute}
+celltypes_test = c('Purkinje', 'Granule', 'OPC/ODC', 'Golgi', 'UBC',
+                   'MLI/PLI', 'Bergmann', 'Astrocyte' )
+
+for (celltype in celltypes_test) {
+  celltype_sub = cluster_metadata_ds[cluster_metadata_ds$analysis_cluster == celltype,]
+  celltype_sub$lob_comp_cluster = droplevels(celltype_sub$lob_comp_cluster)
+  celltype_df = getScatterPlotData_meta(celltype_sub, celltype = celltype)
+  
+  if (exists('full_scatter_df')) {
+    full_scatter_df = rbind(full_scatter_df, celltype_df)
+  } else {
+    full_scatter_df = celltype_df
+  }
+}
+
+full_scatter_df[['log_fc']] = log(full_scatter_df$fc_values, base = 2)
+full_scatter_df[['log_p_values']] = -1 * log(full_scatter_df$p_values + 1e-250, base = 10)
+full_scatter_df[['log_q_values']] = -1 * log(full_scatter_df$q_values + 1e-250, base = 10)
+```
+
+```{r scatterploto}
+ggplot(data = full_scatter_df, aes(x = log_q_values, y = log_fc)) + 
+  geom_point(data = full_scatter_df, aes(color = celltype), size = 2) +
+  xlab('-log10(q-value)') +
+  ylab('log(Max Region FC)') + theme(legend.title = element_blank()) +
+  guides(colour = guide_legend(override.aes = list(size=4))) + 
+  geom_vline(xintercept = 3, linetype = 'dashed', col = 'grey')
+```
+
+## Panel B (Purkinje cells)
+
+```{r dotplot_purk, results='hide'}
+# Subset to purkinjes
+full_cb = SetIdent(full_cb, ident.use = full_cb@meta.data$subcluster)
+purk_s = SubsetData(full_cb, subset.name = 'cluster', accept.value = 'Purkinje', 
+                    subset.raw = T)
+
+#  remember to normalize data
+purk_s = NormalizeData(purk_s)
+genes_purkinje = rev(c("Aldoc",'Kctd16', 'Gpr176', 'Drd3', "Ephb2","Tshz2","Fam19a2",
+                       "Alcam","Tox2","2900055J20Rik","Vmn2r30"))
+
+# pdf("Figure2_panelB.pdf", useDingbats = F, width = 5, height = 3.5)
+# use slightly customized dotplot function
+DotPlot2(purk_s, genes_purkinje,
+         scale.by = 'radius',dot.min = 0.2, dot.scale = 6,
+         scale.min = 0.1,plot.legend = T, x.lab.rot = 45)
+# dev.off()
+```
+
+## Panel C (Aldoc+ and - distributions)
+
+```{r aldoc_map}
+
+# split into aldoc+ and aldoc-
+purk_s@meta.data[['Aldoc_stat']] = sapply(as.character(purk_s@ident), function(x) {
+  split = strsplit(x, '_')[[1]]
+  if (split[2] == 'Anti') {
+    return('Aldoc_neg')
+  } else {
+    return('Aldoc_pos')
+  }
+})
+
+purk_s@meta.data$Aldoc_stat = factor(purk_s@meta.data$Aldoc_stat)
+# plot spatial distributions
+# pdf('Figure2_PanelC_left.pdf', useDingbats = F)
+spatial_enrichment_map_meta(purk_s@meta.data, meta_col = 'Aldoc_stat', sps = SPs, 
+                            cluster = 'Aldoc_pos', do.print = F, color_divergent = T)
+# dev.off()
+
+# pdf('Figure2_PanelC_right.pdf', useDingbats = F)
+spatial_enrichment_map_meta(purk_s@meta.data, meta_col = 'Aldoc_stat', sps = SPs,
+                            cluster = 'Aldoc_neg', do.print = F, color_divergent = T)
+# dev.off()
+```
+
+## Panel D (Purkinje subcluster distributions)
+
+```{r purk_map}
+
+# plot spatial distributions of subclusters
+# pdf('Figure2_panelC.pdf', useDingbats = F)
+# spatial distributions for all purkinje clusters 
+for (clust in levels(purk_s@ident)) {
+  print(spatial_enrichment_map_meta(purk_s@meta.data, meta_col = 'subcluster', sps = SPs,
+                                    cluster = clust, do.print = F, color_divergent = T))
+}
+
+# dev.off()
+
+```
+
+## Panel E (Granule cells)
+
+```{r gran_dotplot, fig.width=4.5, fig.height=3, results='hide'}
+# clean up
+rm(purk_s)
+gc()
+
+gran_s = SubsetData(full_cb, subset.name = 'cluster', accept.value = 'Granule',
+                    subset.raw = T)
+
+gran_s = NormalizeData(gran_s)
+genes_gran = c("Chrm3","Nr4a2","Galntl6", 'Ebf1', "Gprin3", "Rasgrf1")
+
+# pdf("Figure2_panelE.pdf",useDingbats = F, width = 5, height = 3.5)
+DotPlot2(gran_s, genes_gran, dot.scale = 10,
+         scale.min = 0.1, plot.legend = T,
+         x.lab.rot = 45)
+# dev.off()
+
+```
+
+## Panel F (Granule subcluster distributions)
+
+```{r gran_map}
+
+# plot spatial distributions of subclusters
+
+# pdf('Figure2_panelF.pdf', useDingbats = F)
+# spatial distributions for all granule clusters 
+for (clust_i in 1:3) {
+  clust = levels(gran_s@ident)[clust_i]
+  print(spatial_enrichment_map_meta(gran_s@meta.data, meta_col = 'subcluster', sps = SPs,
+                                    cluster = clust, do.print = F, color_divergent = T))
+}
+
+# dev.off()
+
+```
+## Panel G (Bergmann glia)
+
+```{r berg_dotplot, fig.width=4.5, fig.height=3, results='hide'}
+# clean up
+rm(gran_s)
+gc()
+
+bergmann_s = SubsetData(full_cb, subset.name = 'cluster', accept.value = 'Bergmann',
+                    subset.raw = T)
+
+bergmann_s = NormalizeData(bergmann_s)
+
+# pdf('Figure2_panelG', useDingbats = F, height = 3, width = 4)
+DotPlot2(bergmann_s, c('Wif1', 'Mybpc1'), dot.scale = 8,
+         scale.min = 0.1, plot.legend = T, scale.by = 'size',
+         x.lab.rot = 45)
+# dev.off()
+
+```
+
+## Panel H (Bergmann glia subcluster distributions)
+
+```{r berg_map}
+
+# plot spatial distributions of subclusters
+
+# pdf('Figure2_panelH.pdf', useDingbats = F)
+# spatial distributions for Bergmann cluster 
+spatial_enrichment_map_meta(bergmann_s@meta.data, cluster = 'Bergmann_2', meta_col = 'subcluster', sps = SPs,
+                       do.print = F, color_divergent = T)
+
+# dev.off()
+
+```
+
+
+```{r packages}
+sessionInfo()
+```
+

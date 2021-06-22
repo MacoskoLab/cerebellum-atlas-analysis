@@ -1,0 +1,187 @@
+---
+title: "Figure 4: Characterization of MLI2 cells"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this document, we reproduce panels from Figure 4 of our cerebellar cortex transcriptomic atlas manuscript. 
+
+## Load utility functions and data
+
+```{r load, results='hide', message=F, warning=F}
+library(Seurat)
+# v2.3.4
+library(liger)
+library(ggplot2)
+library(cowplot)
+
+# Utility functions
+source('../src/fig2_utils.R')
+source('../src/fig4_utils.R')
+
+```
+
+We first load annotated adult mouse cerebellar cortex data. We can retrieve this in raw count format from [GEO](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE165371) (cb_adult_mouse tar). Download and expand this directory and copy the files into the `data` directory of this repo. 
+
+``` {r data, eval=F}
+# Read in full dataset (as mtx or RDS file)
+# Raw counts can be downloaded from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE165371
+# (cb_adult_mouse)
+# Place in data directory
+counts_cb = readMM('../data/cb_adult_mouse.mtx.gz')
+barcodes_cb = readLines('../data/cb_adult_mouse_barcodes.txt')
+genes_cb = readLines('../data/cb_adult_mouse_genes.txt')
+
+row.names(counts_cb) = genes_cb
+colnames(counts_cb) = barcodes_cb
+
+# Create Seurat object if reading in raw data
+full_cb = CreateSeuratObject(raw.data = counts_cb)
+```
+
+Alternatively, we can download a Seurat object with UMAP representation stored directly from the Single Cell Portal [study](https://singlecell.broadinstitute.org/single_cell/study/SCP795). Download the `cb_annotated_object.RDS` object from the Download tab of the study and copy into the `data` directory. (Note that you will have to sign into SCP in order to access the Download tab.)
+
+``` {r data_obj}
+# Seurat object can be downloaded from SCP
+# place in data directory
+full_cb = readRDS('../data/cb_annotated_object.RDS')
+```
+
+We add in the cluster and subcluster annotations. This also includes additional metadata like sample sex. (Note that the SCP object also contains these annotations.)
+
+```{r metadata}
+# read in cluster metadata (available in data directory)
+cluster_metadata = read.csv('../data/cluster_metadata.csv', header = T, row.names = 1)
+full_cb@meta.data = cluster_metadata
+
+```
+
+## Panel A
+
+``` {r ints_dotplot, results='hide', fig.width=6, fig.height=3.5}
+ints_s = SubsetData(full_cb, subset.name = 'cluster', accept.value = c('MLI1', 'MLI2', 'PLI'),
+                    subset.raw = T)
+ints_s = NormalizeData(ints_s)
+
+# panel a
+genes_ints = c("Htr2a","Slc6a5", "Tns1","Slc16a12","Acvr1c", "Npas3",
+               "Grm8",'Cdh22', 'Nxph1', 'Prkcd', 'Sorcs3',  'Ptprk')
+
+
+# pdf("Figure4_panelA.pdf",useDingbats = F,height = 3.5, width = 6)
+DotPlot2(ints_s, genes.plot = genes_ints,
+         dot.scale = 10, x.lab.rot = 45, plot.legend = T)
+# dev.off()
+```
+## Panel C
+
+``` {r nxph1_sorcs3, fig.width=6, fig.height=4}
+# read in HCR data for SORCS3, NXPH1, GRM8
+grm_data = read.csv('../data/sorcs_nxph_grm_data.csv', stringsAsFactors = F)
+grm_melted = reshape2::melt(grm_data, variable.name = 'slide', value.name = 'count')
+
+summed2 =  grm_melted %>% group_by(slide, position, mli_ident) %>% summarise(sum(count)) %>% ungroup()
+colnames(summed2) = c('slide', 'position', 'mli_ident', 'sum')
+
+summed2$position = factor(summed2$position, levels = c('distal', 'middle', 'inner'))
+merged2 = summed2 %>% group_by(position, slide) %>% summarise(sum(sum)) %>%
+  rename('total' = 'sum(sum)') %>% right_join(summed2)
+merged2[['percent_pos']] = merged2$sum / merged2$total
+
+merged2$mli_ident = factor(merged2$mli_ident, levels = rev(c('sorcs', 'nxph', 'nxph_sorcs')))
+
+# pdf('Figure4_panelC.pdf', useDingbats = F, width = 6, height = 4)
+# set seed for jittering reproducibility 
+set.seed(1)
+merged2 %>% group_by(position, mli_ident) %>% summarise(mean(percent_pos), sd(percent_pos)) %>%
+  ggplot(aes(x = position, y = `mean(percent_pos)`, fill = mli_ident)) +
+  geom_bar(stat = 'identity',
+           position=position_dodge(), width = 0.98) + 
+  scale_fill_manual(values=c('#F8766D', '#3EC14D', '#C13EB2')) + 
+  geom_errorbar(aes(x=position, ymin=`mean(percent_pos)` + `sd(percent_pos)`, 
+                    ymax= `mean(percent_pos)` - `sd(percent_pos)`),
+                position=position_dodge(0.95), width = 0.3, size = 0.3) + 
+  geom_point(data = merged2, aes(x = position, y = percent_pos,
+                                 group = interaction(factor(position),factor(mli_ident))),
+             position = position_jitterdodge(dodge.width=0.95), alpha = 0.6, shape = 1) + 
+  scale_shape(solid = FALSE) + scale_y_continuous(limits = c(0, 0.84), expand = c(0,0)) + 
+  ylab('% cells') + xlab('ML position') + 
+  theme(axis.text.y = element_text(angle = 90)) + 
+  coord_flip()
+# dev.off()
+```
+
+## Panel D-E
+See cb_figure4_DE.html.
+
+## Panel I 
+```{r dimplot, fig.width=6, fig.height=8}
+# Convert to liger object
+ints_split = SplitObject(ints_s, attribute.1 = 'sex', do.clean = T)
+
+ints_l = createLiger(raw.data = list(male = ints_split$male@raw.data,
+                                     female = ints_split$female@raw.data),
+                     remove.missing = F)
+ints_l = liger::normalize(ints_l)
+ints_l@clusters = droplevels(ints_s@meta.data[row.names(ints_l@cell.data), 'cluster'])
+
+# pass in tSNE coordinates
+tsne_ints = read.csv('../data/ints_tsne.csv', row.names = 1, col.names = c('tSNE_1', 'tSNE_2'))
+ints_l@tsne.coords = as.matrix(tsne_ints[row.names(ints_l@cell.data),])
+
+ints_s@dr$tsne = new(Class = "dim.reduction", cell.embeddings = as.matrix(tsne_ints), 
+                     key = "tSNE_")
+
+clusts = DimPlot(ints_s, reduction.use = 'tsne', group.by = 'cluster', no.legend = T, no.axes = T,
+                 do.label = T, cols.use = c('#C13EB2', '#3EC14D', 'blue'), pt.size = 0.001, do.return = T)
+
+gjd2 = plotGene_ordered(ints_l, 'Gjd2', plot.by = 'none', points.only = T, do.legend = F, 
+                     max.clip = 5, clip.absolute = T, pt.size = 0.001, return.plots = T)
+
+# png("Figure4_panelI.png", units="in", width=6, height=8, res=300)
+plot_grid(clusts, gjd2, nrow = 2)
+# dev.off()
+
+```
+
+## Panel K 
+```{r gjd_plot, warning=F, fig.width=5, fig.height=2.5}
+
+# read in HCR data for SORCS3, NXPH1, GJD2
+gjd_data = read.csv('../data/sorcs_nxph_gjd_data.csv', stringsAsFactors = F)
+gjd_melted = reshape2::melt(gjd_data, variable.name = 'slide', value.name = 'count')
+
+# summarise on two levels
+summed =  gjd_melted %>% group_by(slide, mli_ident) %>% summarise(sum(count)) %>% ungroup()
+summed_gjd = gjd_melted %>% group_by(slide, mli_ident, gjd_pos) %>% summarise(sum(count)) %>% 
+  rename('sum_gjd' = 'sum(count)') %>% ungroup()
+
+merged = inner_join(summed, summed_gjd[summed_gjd$gjd_pos == 'TRUE',])
+merged[['percent']] = merged$sum_gjd / merged[['sum(count)']]
+colnames(merged) =  c('slide', 'mli_ident', 'total', 'gjd_pos', 'sum_gjd', 'percent')
+
+# pdf('Figure4_panelK.pdf', useDingbats = F, width = 5, height = 2.5)
+set.seed(1)
+merged %>% group_by(mli_ident) %>% summarise(mean(percent), sd(percent)) %>%
+  ggplot(aes(x = mli_ident, y = `mean(percent)`)) +
+  geom_bar(stat = 'identity', fill = '#C13EB2',
+           position=position_dodge(width = 0.98)) + 
+  scale_x_discrete(breaks=c("nxph","sorcs"),
+                   labels=c("MLI2", "MLI1")) +
+  geom_errorbar(aes(x=mli_ident, ymin=`mean(percent)` + `sd(percent)`, ymax= `mean(percent)` - `sd(percent)`),
+                position=position_dodge(0.95), width = 0.3, size = 0.3) + 
+  xlab('') + ylab('% cells expressing Gjd2') + 
+  coord_flip() +
+  geom_point(data = merged, aes(x = mli_ident, y = percent),
+             position = position_jitter(width = 0.3), alpha = 0.6, shape = 1, size = 2) + 
+  scale_shape(solid = FALSE) + scale_y_continuous(limits = c(0, 1.03), expand = c(0,0)) + 
+  theme(axis.text.y = element_text(angle = 90)) 
+# dev.off()
+```
+
+```{r packages}
+sessionInfo()
+```

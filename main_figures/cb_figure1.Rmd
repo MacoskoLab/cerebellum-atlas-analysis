@@ -1,0 +1,160 @@
+---
+title: "Figure 1: Cerebellar cell type annotation and marker genes"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this document, we reproduce panels from Figure 1 of our cerebellar cortex transcriptomic atlas manuscript. 
+
+## Load utility functions and data
+
+```{r load, results='hide', message=F, warning=F}
+library(Seurat)
+# v2.3.4
+library(Matrix)
+library(Matrix.utils)
+library(dendsort)
+
+# Define an extra utility function
+Matrix.column_norm <- function(A){
+  if (class(A)[1] == "dgTMatrix") {
+    temp = summary(A)
+    col.names = colnames(A)
+    row.names = rownames(A)
+    A = sparseMatrix(i=temp[,1],j=temp[,2],x=temp[,3])
+    rownames(A) = row.names
+    colnames(A) = col.names
+  }
+  A@x <- A@x / rep.int(Matrix::colSums(A), diff(A@p))
+  return(A)
+}
+```
+
+We first load annotated adult mouse cerebellar cortex data. We can retrieve this in raw count format from [GEO](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE165371) (cb_adult_mouse tar). Download and expand this directory and copy the files into the `data` directory of this repo. 
+
+``` {r data, eval=F}
+# Read in full dataset (as mtx or RDS file)
+# Raw counts can be downloaded from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE165371
+# (cb_adult_mouse)
+# Place in data directory
+counts_cb = readMM('../data/cb_adult_mouse.mtx.gz')
+barcodes_cb = readLines('../data/cb_adult_mouse_barcodes.txt')
+genes_cb = readLines('../data/cb_adult_mouse_genes.txt')
+
+row.names(counts_cb) = genes_cb
+colnames(counts_cb) = barcodes_cb
+
+# Create Seurat object if reading in raw data
+full_cb = CreateSeuratObject(raw.data = counts_cb)
+```
+
+If using raw count data, we will have to preprocess and compute the UMAP representation as shown here. 
+
+```{r preprocess, eval=F}
+# If using raw data, preprocess to generate UMAP representation 
+# If using SCP object, this cell can be skipped (obj already has UMAP representation stored)
+full_cb = NormalizeData(full_cb)
+
+# basic dimensionality reduction for coarse cell type visualization
+full_cb = FindVariableGenes(full_cb, do.plot = F)  # top 2000 highly variable genes
+full_cb = ScaleData(full_cb, genes.use = full_cb@var.genes)
+
+full_cb = RunPCA(full_cb, pcs.compute = 50, do.print = F)
+full_cb = RunUMAP(full_cb, dims.use = 1:25)
+```
+
+Alternatively, we can download a Seurat object with UMAP representation stored directly from the Single Cell Portal [study](https://singlecell.broadinstitute.org/single_cell/study/SCP795). Download the `cb_annotated_object.RDS` object from the Download tab of the study and copy into the `data` directory. (Note that you will have to sign into SCP in order to access the Download tab.)
+
+``` {r data_obj}
+# Seurat object can be downloaded from SCP
+# place in data directory
+full_cb = readRDS('../data/cb_annotated_object.RDS')
+```
+
+We add in the cluster and subcluster annotations. This also includes additional metadata like sample sex.
+
+```{r metadata}
+# read in cluster metadata (available in data directory)
+cluster_metadata = read.csv('../data/cluster_metadata.csv', header = T, row.names = 1)
+full_cb@meta.data = cluster_metadata
+```
+
+## Panel B
+
+Reproducing UMAP representation:
+
+```{r umap}
+# UMAP by cluster
+# png("Figure1_panelB.png", units="in", width=6, height=5, res=400)
+DimPlot(full_cb, reduction.use = 'umap', do.label = T, group.by = "cluster",
+        no.legend = T, no.axes = T, pt.size = 0.5)
+# dev.off()
+```
+
+## Panel C
+
+Reproducing dendrogram and marker gene dotplot. 
+
+```{r dendrogram}
+# read in metadata corresponding to object with granule cells downsampled to 60k
+cluster_metadata_ds = read.csv('../data/cluster_metadata_ds.csv', header = T, row.names = 1)
+# read in union of variable genes determined in cluster subanalyses (used for dendrogram)
+var_gene_union = readLines('../data/var_genes_union.txt')
+
+ds_gran_cb = SubsetData(full_cb, cells.use = row.names(cluster_metadata_ds), subset.raw = T)
+ds_gran_cb = SetIdent(ds_gran_cb, ident.use = ds_gran_cb@meta.data$subcluster)
+
+# generate dendrogram
+dge.transpose = Matrix::t(ds_gran_cb@raw.data)
+metacells = aggregate.Matrix(dge.transpose, groupings = ds_gran_cb@ident, fun="sum")
+metacells.norm = Matrix::t(Matrix.column_norm(Matrix::t(metacells)))
+metacells.scaled = scale(as.matrix(metacells.norm))
+colnames(metacells.scaled) = row.names(ds_gran_cb@raw.data)
+
+# subset to just relevant genes
+m = metacells.scaled[, var_gene_union]
+
+# compute gene based distance and hierarchical clusters 
+# (Weighted Pair Group Method with arithmetic mean)
+dist.mat = dist(m)
+hier = dendsort(hclust(dist.mat, method = 'mcquitty'))
+```
+
+```{r plot_dend}
+# Figure 1c dendrogram only
+# Note that final dendrogram was rotated in paper
+# pdf("Figure1_panelC_dendrogram.pdf",useDingbats = F, width = 5, height = 4)
+plot(hier, labels=F, hang=-1)
+# dev.off()
+```
+
+```{r order_clusts, results = 'hide', fig.show='hide'}
+# Genes for dotplot
+genes_plot = rev(c('Ppp1r17', 'Gabra6', 'Eomes', 'Lypd6', 'Prkcd', 'Klhl1',
+                   'Lgi2', 'Gdf10', 'Aqp4', 
+                   'Mobp', 'Ppfibp1', 
+                   'Dcn', 'Kcnj8', 'Ttr', 'Mrc1', 'C1qa',
+                   'Flt1', 'Foxj1'))
+
+# Order subclusters as in dendrogram 
+# There may be slight discrepancies in subcluster ordering depending on version of dendsort
+ordered_ident = factor(ds_gran_cb@meta.data$subcluster, levels = row.names(m)[hier$order])
+ds_gran_cb@ident = ordered_ident
+ds_gran_cb = NormalizeData(ds_gran_cb)
+dotplot = Seurat::DotPlot(ds_gran_cb, genes.plot = genes_plot, dot.min = 0.08, scale.by = 'radius',
+                          x.lab.rot = T, dot.scale = 6, plot.legend = T, do.return = T)
+dotplot = dotplot + theme(axis.text.x=element_text(angle=45,hjust = 0.95, vjust=0.95))
+```
+```{r plot_dot, fig.width=10, fig.height=8.5, warning=F}
+# Figure 1C dotplot 
+# pdf('Figure1_panelC_dotplot.pdf', useDingbats = F, width = 9, height = 8)
+dotplot
+# dev.off()
+```
+```{r packages}
+sessionInfo()
+```
+

@@ -1,0 +1,176 @@
+---
+title: "Figure 4: Characterization of developing MLI2 cells"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this document, we reproduce panels from Figure 4 of our cerebellar cortex transcriptomic atlas manuscript. 
+
+## Load utility functions and data
+
+```{r load, results='hide', message=F, warning=F}
+library(Seurat)
+# v3.1.5
+library(monocle3)
+library(ggplot2)
+library(cowplot)
+
+# Additional plotting functions
+source('../src/fig4_monocle.R')
+
+# Define an extra utility function
+Matrix.column_norm <- function(A){
+  if (class(A)[1] == "dgTMatrix") {
+    temp = summary(A)
+    col.names = colnames(A)
+    row.names = rownames(A)
+    A = sparseMatrix(i=temp[,1],j=temp[,2],x=temp[,3])
+    rownames(A) = row.names
+    colnames(A) = col.names
+  }
+  A@x <- A@x / rep.int(Matrix::colSums(A), diff(A@p))
+  return(A)
+}
+
+```
+
+We can download a Seurat object with relevant metadata directly from the Single Cell Portal [study](https://singlecell.broadinstitute.org/single_cell/study/SCP795). Download the `cb_dev_annotated.RDS` object from the Download tab of the study and copy into the `data` directory. (Note that you will have to sign into SCP in order to access the Download tab.)
+
+```{r load_seurat}
+cb_dev_s = readRDS('../data/cb_dev_annotated.RDS')
+```
+
+To reproduce some of the pseudotime and gene module analyses (also relevant for Extended Data Figure 6), we need to create a Monocle object and do some basic preprocessing. Note that the UMAP coordinates are taken directly from the original LIGER analysis of the unannotated developmental data (this unannotated data is available as raw count matrix in RDS format on SCP, as `cb_dev_counts.RDS`). 
+
+```{r monocle_preprocess, results='hide'}
+
+# Create monocle object
+cb_dev_mon = new_cell_data_set(expression_data = cb_dev_s@assays$RNA@counts)
+
+# add batch information 
+cb_dev_mon@colData[['sample']] = sapply(colnames(cb_dev_mon), function(x) {
+  splits = strsplit(x, '_')[[1]]
+  # if from the dev datasets
+  if (splits[2] %in% c(1, 2)) {
+    paste0(splits[1], '_', splits[2])
+  } else {
+    paste0('P60_', splits[1], '_', splits[2])
+  }
+})
+# set gene row name 
+rowData(cb_dev_mon)[['gene_short_name']] = row.names(rowData(cb_dev_mon))
+
+cb_dev_mon@colData[['age']] = sapply(cb_dev_mon@colData$sample, function(x) {
+  strsplit(x, '_')[[1]][1]
+})
+# basic preprocessing
+cb_dev_mon <- preprocess_cds(cb_dev_mon, num_dim = 30, use_genes = cb_dev_s@assays$RNA@var.features)
+# set UMAP
+reducedDims(cb_dev_mon)$UMAP = cb_dev_s@reductions$umap@cell.embeddings
+
+# generate partitions/cluster from UMAP
+cb_dev_mon <- cluster_cells(cb_dev_mon, resolution = 5e-4, random_seed = 1)
+
+cb_dev_mon <- learn_graph(cb_dev_mon)
+
+```
+
+
+```{r pseudotime}
+# Compute pseudotime
+# Select top node as root along with rightmost node of 
+# non-MLI partition (if running in interactive)
+
+# these nodes are 
+root_pr_nodes = c('Y_62', 'Y_243')
+
+cb_dev_mon = order_cells(cb_dev_mon, root_pr_nodes = root_pr_nodes)
+```
+## Panel D
+
+```{r panel_d, fig.width=7, fig.height=3, warning=F}
+
+cb_dev_mon@colData$age = factor(cb_dev_mon@colData$age, 
+                                levels = c('E18', 'P0', 'P4', 'P8', 'P12', 'P16'), ordered = T)
+
+# pdf('Figure4_panelD.pdf', width = 3.2, height = 3, useDingbats = F)
+age = plot_cells_colors(cb_dev_mon,
+           color_cells_by = 'age',
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           label_roots = F,
+           graph_label_size=3,
+           trajectory_graph_segment_size = 0.5,
+           trajectory_graph_color = 'grey60',
+           cell_size = 0.5, direction = -1, viridis_option = 'viridis')
+# dev.off()
+
+
+gradient = plot_cells_colors(cb_dev_mon,
+                         color_cells_by = 'pseudotime',
+                         label_cell_groups=FALSE,
+                         label_leaves=FALSE,
+                         label_branch_points=FALSE,
+                         label_roots = F,
+                         graph_label_size=3,
+                         trajectory_graph_segment_size = 0.5,
+                         trajectory_graph_color = 'grey60',
+                         cell_size = 0.5, use_gradient = T, high_col = 'orangered')
+
+plot_grid(age, gradient)
+```
+
+## Panel E
+
+```{r gene_monocle, fig.width=7.8, fig.height=3.2, warning=F}
+# compute normalization as in liger
+norm_genes = Matrix.column_norm(cb_dev_s@assays$RNA@counts)
+
+# note that each gene is individually scaled for better resolution of developmental temporal changes 
+# remove legend.position = 'none' for legend comparison
+
+# pdf('Figure4_panelE.pdf', width = 7.8, height = 3.2, useDingbats = F)
+sorcs = plot_cells_colors(cb_dev_mon,
+                            genes = c('Sorcs3'),
+                            label_cell_groups=FALSE,
+                            label_leaves=FALSE,
+                            label_branch_points=FALSE,
+                            label_roots = F,
+                            graph_label_size=3,
+                            trajectory_graph_segment_size = 0.5,
+                            trajectory_graph_color = 'grey60',
+                            cell_size = 0.5,
+                            normalized_values = norm_genes) + theme(legend.position = 'none')
+nxph = plot_cells_colors(cb_dev_mon,
+                           genes = c('Nxph1'),
+                           label_cell_groups=FALSE,
+                           label_leaves=FALSE,
+                           label_branch_points=FALSE,
+                           label_roots = F,
+                           graph_label_size=3,
+                           trajectory_graph_segment_size = 0.5,
+                           trajectory_graph_color = 'grey60',
+                           cell_size = 0.5,
+                           normalized_values = norm_genes) + theme(legend.position = 'none')
+fos = plot_cells_colors(cb_dev_mon,
+                          genes = c('Fos'),
+                          label_cell_groups=FALSE,
+                          label_leaves=FALSE,
+                          label_branch_points=FALSE,
+                          label_roots = F,
+                          graph_label_size=3,
+                          trajectory_graph_segment_size = 0.5,
+                          trajectory_graph_color = 'grey60',
+                          cell_size = 0.5,
+                          normalized_values = norm_genes) + theme(legend.position = 'none')
+plot_grid(sorcs, nxph, fos, nrow = 1)
+# dev.off()
+```
+
+```{r packages}
+sessionInfo()
+```
