@@ -12,7 +12,11 @@ Markdown files to reproduce the main figures are available in `main_figures` and
 
 [Figure 2: Characterization of spatial variation](https://raw.githack.com/MacoskoLab/cerebellum-atlas-analysis/master/main_figures/cb_figure2.html)
 
+[Figure 3: Cross-cluster continuity of neuronal populations](https://raw.githack.com/MacoskoLab/cerebellum-atlas-analysis/master/main_figures/cb_figure3.html)
+
 [Figure 4: Characterization of MLI2  cells](https://raw.githack.com/MacoskoLab/cerebellum-atlas-analysis/master/main_figures/cb_figure4.html)
+
+[Figure 4: Development of MLI2  cells](https://raw.githack.com/MacoskoLab/cerebellum-atlas-analysis/master/main_figures/cb_figure4_DE.html)
 
 Some custom functions for Seurat/LIGER object manipulation and analysis (not yet available in LIGER) are included in `cb_custom_functions.R` and `src`.  
 

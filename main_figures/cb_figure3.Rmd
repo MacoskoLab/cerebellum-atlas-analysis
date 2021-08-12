@@ -1,0 +1,256 @@
+---
+title: "Figure 3: Cross-cluster continuity across neuronal populations"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this document, we reproduce panels from Figure 3 of our cerebellar cortex transcriptomic atlas manuscript. 
+
+## Load utility functions and data
+
+```{r load, results='hide', message=F, warning=F}
+library(Seurat)
+# v2.3.4
+library(monocle)
+# v2.10.1
+library(ggplot2)
+library(liger)
+
+# Utility functions
+source('../src/fig3_utils.R')
+
+```
+
+We first load annotated adult mouse cerebellar cortex data. We can retrieve this in raw count format from [GEO](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE165371) (cb_adult_mouse tar). Download and expand this directory and copy the files into the `data` directory of this repo. 
+
+``` {r data, eval=F}
+# Read in full dataset (as mtx or RDS file)
+# Raw counts can be downloaded from https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE165371
+# (cb_adult_mouse)
+# Place in data directory
+counts_cb = readMM('../data/cb_adult_mouse.mtx.gz')
+barcodes_cb = readLines('../data/cb_adult_mouse_barcodes.txt')
+genes_cb = readLines('../data/cb_adult_mouse_genes.txt')
+
+row.names(counts_cb) = genes_cb
+colnames(counts_cb) = barcodes_cb
+
+# Create Seurat object if reading in raw data
+full_cb = CreateSeuratObject(raw.data = counts_cb)
+```
+
+Alternatively, we can download a Seurat object with annotation information directly from the Single Cell Portal [study](https://singlecell.broadinstitute.org/single_cell/study/SCP795). Download the `cb_annotated_object.RDS` object from the Download tab of the study and copy into the `data` directory. (Note that you will have to sign into SCP in order to access the Download tab.)
+
+``` {r data_obj}
+# Seurat object can be downloaded from SCP
+# place in data directory
+full_cb = readRDS('../data/cb_annotated_object.RDS')
+```
+
+We add in the cluster and subcluster annotations. This also includes additional metadata like sample sex. (Note that the SCP object also contains these annotations.)
+
+```{r metadata}
+# read in cluster metadata (available in data directory)
+cluster_metadata = read.csv('../data/cluster_metadata.csv', header = T, row.names = 1)
+full_cb@meta.data = cluster_metadata
+
+# also read in metadata corresponding to object with granule cells downsampled to 60k
+cluster_metadata_ds = read.csv('../data/cluster_metadata_ds.csv', header = T, row.names = 1,
+                               stringsAsFactors = F)
+```
+
+## Compute cluster continuity for select populations
+We can subset to appropriate clusters for comparison using initial annotated object and analyze continuity of gene expression across populations in these subobjects. This will produce similar results to those in Figure 3; to reproduce figures exactly, use indicated subobjects downloaded from SCP (place in `data` directory).
+```{r fit_curves, warning=F}
+
+# Results for MLI1/MLI2
+# mli_comb = SubsetData(full_cb, subset.name = 'cluster', accept.value = c('MLI1', 'MLI2'),
+#                       subset.raw = T)
+# mli_comb = SetIdent(mli_comb, ident.use = mli_comb@meta.data$cluster)
+mli_comb = readRDS('../data/mli_ds_seurat.RDS')
+
+mli_returned = generateObjectContinuityFits(mli_comb, 'MLI1', 'MLI2', use.raw.order = F,
+                                            reverse_order = T)
+
+# Results for MLI1/Golgi
+# golgi_mli = SubsetData(full_cb, subset.name = 'cluster', accept.value = c('MLI1', 'Golgi'),
+#                        subset.raw = T)
+# golgi_mli = SetIdent(golgi_mli, ident.use = golgi_mli@meta.data$cluster)
+
+golgi_mli = readRDS('../data/golgi_mli1_ds_seurat.RDS')
+
+gmli_returned = generateObjectContinuityFits(golgi_mli, 'MLI1',  
+                                             'Golgi', use.raw.order = F, reverse_order = T)
+
+# Results for MLI1 subclusters
+# mli1_s = SubsetData(full_cb, subset.name = 'cluster', accept.value = c('MLI1'), subset.raw = T)
+# mli1_s = SetIdent(mli1_s, ident.use = mli1_s@meta.data$subcluster)
+
+mli1_s = readRDS('../data/mli1_ds_seurat.RDS')
+
+mli1_returned = generateObjectContinuityFits(mli1_s, 'MLI1_1',  
+                                             'MLI1_2', use.raw.order = F, reverse_order = T)
+
+# Results for Golgi subclusters
+# golgi_s = SubsetData(full_cb, subset.name = 'cluster', accept.value = c('Golgi'), subset.raw = T)
+# golgi_s = SetIdent(golgi_s, ident.use = golgi_s@meta.data$subcluster)
+
+golgi_s = readRDS('../data/golgi_seurat.RDS')
+
+golgi_returned = generateObjectContinuityFits(golgi_s, 'Golgi_1',  
+                                              'Golgi_2', use.raw.order = F, reverse_order = F)
+
+# Results for UBC subclusters
+# ubc_s = SubsetData(full_cb, subset.name = 'cluster', accept.value = c('UBC'), subset.raw = T)
+# ubc_s = SetIdent(ubc_s, ident.use = ubc_s@meta.data$subcluster)
+
+ubc_s = readRDS('../data/ubc_seurat.RDS')
+
+ubc_returned = generateObjectContinuityFits(ubc_s, 'UBC_1',  
+                                            'UBC_3', use.raw.order = F, reverse_order = F,
+                                            return_monocle = T)
+
+```
+
+``` {r aggregate, warning=F}
+
+# Using top 200 genes ranked by spearman correlation
+agg_results = makeCompareDF2(list(gmli_returned$fits,
+                                  mli1_returned$fits, 
+                                  mli_returned$fits,
+                                  ubc_returned$fits,
+                                  golgi_returned$fits),
+                                n_cell_counts = c(5000, 5000, 5000, 1613, 3989),
+                                names = c('MLI1_Golgi', 'MLI1_1_MLI1_2', 'MLI1_MLI2', 'UBC', 'Golgi'),
+                                top_ranked_spearman = 200, converged_only = T, 
+                                positive_v = T)
+```
+
+
+## Panel A
+
+``` {r plot_examples, fig.width=7, fig.height=4, warning=F}
+# Plot representative genes
+grm8 = plotFittedGene(mli1_returned$object, 'Grm8', factor_order = mli1_returned[[2]], 
+                        fitparams = mli1_returned[[1]], return.plot = T, use_scale = T, do.legend = F)
+grm8 = grm8 + scale_color_manual(values = c('#FBBBFF', '#C13EB2')) + 
+  ggtitle(paste0('Grm8 (m = ', round(agg_results['Grm8', 'mid_slope'], 2), ')'))
+npas3 = plotFittedGene(mli1_returned$object, 'Npas3', factor_order = mli1_returned[[2]], 
+                        fitparams = mli1_returned[[1]], return.plot = T, use_scale = T, do.legend = F)
+npas3 = npas3 + scale_color_manual(values = c('#FBBBFF', '#C13EB2')) + 
+  ggtitle(paste0('Npas3 (m = ', round(agg_results['Npas3', 'mid_slope'], 2), ')'))
+
+ptprk = plotFittedGene(mli_returned$object, 'Ptprk', factor_order = mli_returned[[2]], 
+                        fitparams = mli_returned[[1]], return.plot = T, use_scale = T, do.legend = F)
+ptprk = ptprk + scale_color_manual(values = c('#C13EB2', '#3EC14D')) + 
+  ggtitle(paste0('Ptprk (m = ', round(agg_results['Ptprk', 'mid_slope'], 2), ')'))
+
+nxph1 = plotFittedGene(mli_returned$object, 'Nxph1', factor_order = mli_returned[[2]], 
+                        fitparams = mli_returned[[1]], return.plot = T, use_scale = T, do.legend = F)
+nxph1 = nxph1 + scale_color_manual(values = c('#C13EB2', '#3EC14D')) + 
+  ggtitle(paste0('Nxph1 (m = ', round(agg_results['Nxph1', 'mid_slope'], 2), ')'))
+
+
+# pdf('Figure3_panelA.pdf', useDingbats = F, width = 4, height = 9)
+plot_grid(grm8, ptprk, npas3, nxph1, ncol = 2, align = 'v', axis = 'l')
+# dev.off()
+
+```
+
+## Panel B
+
+``` {r plot_lines, fig.width=7, fig.height=4, warning=F}
+
+# pdf('Figure3_panelB.pdf', useDingbats = F,  width = 7, height = 4)
+ggplot(agg_results, aes(x = log_midslope, col = dataset)) + stat_ecdf() +
+  xlab('log10(m)') + ylab('Proportion of DE genes') + theme(legend.title = element_blank())
+# dev.off()
+
+```
+
+## Panel C
+
+``` {r ubc_tsne, fig.width=6, fig.height=4.5, warning=F}
+
+# Convert to liger object for plotting
+ubc_split = SplitObject(ubc_s, attribute.1 = 'sex', do.clean = T)
+
+ubc_l = createLiger(raw.data = list(male = ubc_split$male@raw.data,
+                                     female = ubc_split$female@raw.data),
+                     remove.missing = F)
+ubc_l = liger::normalize(ubc_l)
+
+# pass in tSNE coordinates and pseudotime
+ubc_l@tsne.coords = as.matrix(ubc_s@dr$tsne@cell.embeddings[row.names(ubc_l@cell.data),])
+ubc_l@cell.data[['pseudotime']] = ubc_returned$monocle@phenoData@data[row.names(ubc_l@cell.data), 'Pseudotime']
+
+pseudo_plot = plotFeature(ubc_l, 'pseudotime', by.dataset = F, pt.size = 0.005 ,return.plots = T)
+pseudo_plot = pseudo_plot + scale_color_gradient(low = 'grey', high = 'orangered')
+pseudo_plot = pseudo_plot + theme(
+  axis.line = element_blank(), axis.text.x = element_blank(),
+  axis.text.y = element_blank(), axis.ticks = element_blank(),
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.background = element_blank(), panel.border = element_blank(),
+  panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+  plot.background = element_blank(), plot.title = element_blank())
+
+ubc_plcb4 = plotGene_ordered(ubc_l, 'Plcb4', plot.by = 'none', points.only = T, do.legend = T, 
+                          pt.size = 0.005, return.plots = T)
+
+ubc_plcb1 = plotGene_ordered(ubc_l, 'Plcb1', plot.by = 'none', points.only = T, do.legend = T, pt.size = 0.005,
+                          return.plots = T)
+ubc_eomes = plotGene_ordered(ubc_l, 'Eomes', plot.by = 'none', points.only = T, do.legend = T, pt.size = 0.005,
+                          return.plots = T)
+ubc_grm1 = plotGene_ordered(ubc_l, 'Grm1', plot.by = 'none', points.only = T, do.legend = T, pt.size = 0.005,
+                          return.plots = T)
+ubc_calb2 = plotGene_ordered(ubc_l, 'Calb2', plot.by = 'none', points.only = T, do.legend = T, pt.size = 0.005,
+                          return.plots = T)
+
+# pdf('Figure3_panelC.pdf', useDingbats = F, width = 3.5, height = 4.5)
+plot_grid(pseudo_plot, ubc_eomes, ubc_grm1, ubc_calb2, ubc_plcb4, ubc_plcb1, ncol = 2)
+# dev.off()
+
+```
+
+## Panel D
+
+``` {r plot_ubc_examples, fig.width=4, fig.height=9, warning=F}
+# Plot representative genes
+
+# color by pseudotime
+ubc_returned$object@meta.data[['pseudotime']] = ubc_returned$monocle@phenoData@data[row.names(ubc_returned$object@meta.data), 
+                                                                                    'Pseudotime']
+
+grm1 = plotFittedGene(ubc_returned$object, 'Grm1', factor_order = ubc_returned$pseudo_order, color_by_cluster = F,
+                      continuous_color = 'pseudotime', use_gradient = T,
+                        fitparams = ubc_returned[[1]], return.plot = T, use_scale = T, do.legend = T)
+grm1 = grm1 +  ggtitle(paste0('Grm1 (m = ', round(agg_results['Grm11', 'mid_slope'], 2), ')'))
+
+calb2 = plotFittedGene(ubc_returned$object, 'Calb2', factor_order = ubc_returned$pseudo_order, color_by_cluster = F,
+                      continuous_color = 'pseudotime', use_gradient = T,
+                        fitparams = ubc_returned[[1]], return.plot = T, use_scale = T, do.legend = T)
+calb2 = calb2 +  ggtitle(paste0('Calb2 (m = ', round(agg_results['Calb2', 'mid_slope'], 2), ')'))
+
+plcb4 = plotFittedGene(ubc_returned$object, 'Plcb4', factor_order = ubc_returned$pseudo_order, color_by_cluster = F,
+                      continuous_color = 'pseudotime', use_gradient = T,
+                        fitparams = ubc_returned[[1]], return.plot = T, use_scale = T, do.legend = T)
+plcb4 = plcb4 +  ggtitle(paste0('Plcb4 (m = ', round(agg_results['Plcb4', 'mid_slope'], 2), ')'))
+
+plcb1 = plotFittedGene(ubc_returned$object, 'Plcb1', factor_order = ubc_returned$pseudo_order, color_by_cluster = F,
+                      continuous_color = 'pseudotime', use_gradient = T,
+                        fitparams = ubc_returned[[1]], return.plot = T, use_scale = T, do.legend = T)
+plcb1 = plcb1 +  ggtitle(paste0('Plcb1 (m = ', round(agg_results['Plcb1', 'mid_slope'], 2), ')'))
+
+# pdf('Figure3_panelD.pdf', useDingbats = F, width = 4, height = 9)
+plot_grid(grm1, calb2, plcb4, plcb1, ncol = 1, align = 'v', axis = 'l')
+# dev.off()
+
+```
+
+```{r packages}
+sessionInfo()
+```
