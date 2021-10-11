@@ -3,130 +3,11 @@ library(liger)
 library(Seurat)
 
 ######################################################################################
-## Supplementary liger functions (similar to SeuratExtraFunctions)
-
-### this function plots a series of "binary" tsne plots for a particular feature column in 
-# object@cell.data, plotting the presence of one feature, one plot at a time 
-# example: using this to generate region enrichment plots for object
-# library(cowplot)
-# region_plots = plotFeatureSingle(astro_liger, feature = 'region', return.plots = T)
-# plot_grid(region_plots[['I']], region_plots[['VI']], region_plots[['VII']], region_plots[['IX']], ncol = 2)
-plotFeatureSingle = function(object, feature, by.dataset = F, title = NULL, 
-                             subset.keep = NULL, alpha = 0.5,
-                             pt.size = 0.3, text.size = 3, do.shuffle = T, rand.seed = 1, do.labels = F,
-                             axis.labels = NULL, do.legend = T, legend.size = 5, option = 'plasma', 
-                             zero.color = '#F5F5F5', return.plots = F) 
-{
-  if (is.null(subset.keep)) {
-    subset.keep = unique(object@cell.data[[feature]])
-  } 
-  print(subset.keep)
-  plot_list = list()
-  for (type in subset.keep) {
-    tmp_name = paste0('is_', type)
-    object@cell.data[[tmp_name]] = as.character(sapply(object@cell.data[[feature]], function(x){
-      x == type
-    }))
-    plots = plotFeature(object, feature = tmp_name, discrete = T, by.dataset = by.dataset, alpha = alpha,
-                        return.plots = T)
-    plots = plots + scale_color_manual(values=c(zero.color, '#F8766D'))
-    plot_list[[type]] = plots
-  }
-  return(plot_list)
-}
-
-##### This fixes some errors in the original plotFeature function (latest version of liger has this 
-# version as plotFeature) -- allows correct merging when by.dataset = F
-# this fixes 
-plotFeature2 <- function(object, feature, by.dataset = T, discrete = NULL, title = NULL, 
-                         pt.size = 0.3, text.size = 3, do.shuffle = T, rand.seed = 1, do.labels = F,
-                         alpha = 1, 
-                         axis.labels = NULL, do.legend = T, legend.size = 5, option = 'plasma', 
-                         zero.color = '#F5F5F5', return.plots = F) {
-  dr_df <- data.frame(object@tsne.coords)
-  colnames(dr_df) <- c("dr1", "dr2")
-  if (!(feature %in% colnames(object@cell.data))) {
-    stop('Please select existing feature in cell.data, or add it before calling.')
-  }
-  dr_df$feature <- object@cell.data[, feature]
-  if (is.null(discrete)) {
-    if (class(dr_df$feature) != "factor") {
-      discrete <- FALSE
-    } else {
-      discrete <- TRUE
-    }
-  }
-  if (!discrete){
-    dr_df$feature[dr_df$feature == 0] <- NA
-  }
-  if (by.dataset) {
-    dr_df$dataset <- object@cell.data$dataset
-  } else {
-    dr_df$dataset <- factor("single")
-  }
-  if (do.shuffle) {
-    set.seed(rand.seed)
-    idx <- sample(1:nrow(dr_df))
-    dr_df <- dr_df[idx, ]
-  }
-  p_list <- list()
-  for (sub_df in split(dr_df, f = dr_df$dataset)) {
-    ggp <- ggplot(sub_df, aes(x = dr1, y = dr2, color = feature)) + geom_point(size = pt.size, alpha = alpha)
-    
-    # if data is not discrete
-    if (discrete) {
-      ggp <- ggp + guides(color = guide_legend(override.aes = list(size = legend.size))) +
-        labs(col = feature)
-      if (do.labels) {
-        centers <- sub_df %>% group_by(feature) %>% summarize(
-          dr1 = median(x = dr1),
-          dr2 = median(x = dr2)
-        )
-        ggp <- ggp + geom_text(data = centers, mapping = aes(label = feature),
-                               colour = "black", size = text.size)
-      }
-    } else {
-      ggp <- ggp + scale_color_viridis_c(option = option,
-                                         direction = -1,
-                                         na.value = zero.color) + labs(col = feature)
-    }
-    
-    if (by.dataset) {
-      base <- as.character(sub_df$dataset[1])
-    } else {
-      base <- ""
-    }
-    if (!is.null(title)) {
-      base <- paste(title, base)
-    }
-    ggp <- ggp + ggtitle(base)
-    if (!is.null(axis.labels)) {
-      ggp <- ggp + xlab(axis.labels[1]) + ylab(axis.labels[2])
-    }
-    if (!do.legend) {
-      ggp <- ggp + theme(legend.position = "none")
-    }
-    p_list[[as.character(sub_df$dataset[1])]] <- ggp
-  }
-  if (by.dataset) {
-    p_list <- p_list[names(object@raw.data)]
-  }
-  
-  if (return.plots){
-    if (length(p_list) == 1) {
-      return(p_list[[1]])
-    } else {
-      return(p_list)
-    }
-  } else {
-    for (plot in p_list) {
-      print(plot)
-    }
-  }
-}
+## Supplementary liger functions 
 
 #### an improvement to clusterLouvainJaccard -- allowing users to set more parameters and stores those
 # parameters inside parameters slot of liger object (under list name 'Seurat')
+# note that this produces same results as combination of makeSNN and calcClusters below
 clusterLouvainJaccard2 = function (object, resolution = 0.1, k.param = 30, n.iter = 10, 
                                    reduction.type = 'NMF', force.recalc = T, save.SNN = T, 
                                    n.start = 10, print.output = F, dims.use = 1:ncol(object@H.norm), ...) 
@@ -224,11 +105,11 @@ getCBAnimal <- function(object) {
 # plotByDatasetAndCluster with png
 
 plotGene_png <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 'dataset', 
-                         log2scale = NULL, methylation.indices = NULL, plot.by = 'dataset', 
-                         set.dr.lims = F, pt.size = 0.1, min.clip = NULL, max.clip = NULL, 
-                         clip.absolute = F, points.only = F, option = 'plasma', cols.use = NULL, 
-                         zero.color = '#F5F5F5', axis.labels = NULL, do.legend = T, return.plots = F,
-                         use.png = T, width = 7, height = 6, dpi = 100) {
+                     log2scale = NULL, methylation.indices = NULL, plot.by = 'dataset', 
+                     set.dr.lims = F, pt.size = 0.1, min.clip = NULL, max.clip = NULL, 
+                     clip.absolute = F, points.only = F, option = 'plasma', cols.use = NULL, 
+                     zero.color = '#F5F5F5', axis.labels = NULL, do.legend = T, return.plots = F,
+                     use.png = T, width = 7, height = 6, dpi = 100) {
   if ((plot.by != scale.by) & (use.scaled)) {
     warning("Provided values for plot.by and scale.by do not match; results may not be very
             interpretable.")
@@ -308,7 +189,7 @@ plotGene_png <- function(object, gene, use.raw = F, use.scaled = F, scale.by = '
               prevent this.")
     }
     names(min.clip) <- levels(dr_df$plotby)
-    }
+  }
   if (!is.null(max.clip) & is.null(names(max.clip))) {
     if (num_levels > 1) {
       message("Adding names to max.clip according to levels in plot.by group; order may not be 
@@ -316,7 +197,7 @@ plotGene_png <- function(object, gene, use.raw = F, use.scaled = F, scale.by = '
               prevent this.")
     }
     names(max.clip) <- levels(dr_df$plotby)
-    }
+  }
   p_list <- list()
   for (sub_df in split(dr_df, f = dr_df$plotby)) {
     # maybe do quantile cutoff here
@@ -391,12 +272,12 @@ plotGene_png <- function(object, gene, use.raw = F, use.scaled = F, scale.by = '
       print(plot)
     }
   }
-  }
+}
 
 plotByDatasetAndCluster_png <- function(object, clusters = NULL, title = NULL, pt.size = 0.3,
-                                        text.size = 3, do.shuffle = T, rand.seed = 1,
-                                        axis.labels = NULL, do.legend = T, legend.size = 5,
-                                        return.plots = F, use.png = T, width = 7, height = 6, dpi = 100) {
+                                    text.size = 3, do.shuffle = T, rand.seed = 1,
+                                    axis.labels = NULL, do.legend = T, legend.size = 5,
+                                    return.plots = F, use.png = T, width = 7, height = 6, dpi = 100) {
   tsne_df <- data.frame(object@tsne.coords)
   colnames(tsne_df) <- c("tsne1", "tsne2")
   tsne_df$Dataset <- unlist(lapply(1:length(object@H), function(x) {
@@ -731,7 +612,7 @@ NoAxes <- function(..., keep.text = FALSE, keep.ticks = FALSE) {
 
 
 ###############################################################################
-## Supplementary Seurat functions (original SeuratExtraFunctions further below)
+## Supplementary Seurat functions 
 
 # This function takes all possible pairs of clusters in a Seurat object and finds
 # DE genes between them -- concatenates all dataframes into single result and returns
@@ -752,6 +633,36 @@ FindMarkersPairwise = function(object, max.cells.per.ident = 700, ...) {
     results[[i]] <- markers_pair
   }
   
+  results.df <- do.call(rbind, results)
+  return(results.df)
+}
+
+FindMarkersPairwisePerm = function(object, clusters = NULL, max.cells.per.ident = 700, only.pos = T, ...) {
+  clusters_all <- levels(object@ident)
+  
+  if (is.null(clusters)) {
+    clusters = clusters_all
+  }
+  
+  results <- list()
+  index = 0
+  for (i in clusters) {
+    for (j in clusters_all) {
+      if (i != j) {
+        index = index + 1
+        
+        message('Finding DE genes between ', i, ' and ', j)
+        markers_pair <- FindMarkers(object, ident.1 = i, ident.2 = j, only.pos = only.pos,
+                                    max.cells.per.ident = max.cells.per.ident, ...)
+        markers_pair$pct_diff = markers_pair$pct.1 - markers_pair$pct.2
+        markers_pair$ident.1 <- i
+        markers_pair$ident.2 <- j
+        markers_pair$gene <- rownames(markers_pair)
+        results[[index]] <- markers_pair
+      }
+    }
+    
+  }
   results.df <- do.call(rbind, results)
   return(results.df)
 }
@@ -1041,6 +952,19 @@ ResetPar <- function(...) {
 }
 
 
+
+######################################################################################
+# Additional utility functions
+
+ligerToSeurat2<-function(liger, ...){
+  seurat<-ligerToSeurat(liger, ...)
+  seurat<-RenameCells(seurat, new.names =  rownames(liger@cell.data))
+  seurat<-regionslot(seurat)
+  seurat@meta.data[['liger_ident']]<-factor(liger@clusters)
+  return(seurat)
+}
+
+##############################
 # spatial gene selection 
 ###
 # give option to do the averaging in raw gene space or scaled gene space 
@@ -1191,6 +1115,7 @@ ligerToSeurat_raw = function (object, nms = names(object@H), renormalize = T, us
   return(new.seurat)
 }
 
+# faster version of function above
 library(Matrix.utils)
 spatial_variable_select_clean_fast<-function(liger_object, cell.var = "regions", use.raw = F, 
                                              use.scale = F, alpha = 0.01,density.bandwidth = "nrd0"){
@@ -1199,12 +1124,12 @@ spatial_variable_select_clean_fast<-function(liger_object, cell.var = "regions",
   names(groupings) = rownames(liger_object@cell.data)
   # dge = MergeSparseDataAll(liger_object@raw.data)
   dge.norm = MergeSparseDataAll(liger_object@norm.data)
-  x = Sparse_transpose(dge.norm)
+  x = Matrix::t(dge.norm)
   sums=aggregate.Matrix(x=x,groupings = groupings[intersect(names(groupings),colnames(dge.norm))])
   sums = as.matrix(sums)
   tab = table(groupings)
   avg_lobe_expression_mat = as.data.frame(t(sweep(sums,1,tab,"/")))
-  rownames(avg_lobe_expression_mat) = rownames(dge.norm)
+  rownames(avg_lobe_expression_mat) = row.names(dge.norm)
   #Between lobe variability 
   mean<-rowMeans(avg_lobe_expression_mat)
   var<-RowVar(avg_lobe_expression_mat)
@@ -1248,7 +1173,8 @@ spatial_variable_select_clean_fast<-function(liger_object, cell.var = "regions",
   return(final_list)
 }
 
-########################################## new plotGene function (included in latest version of liger)
+########################################## 
+# new plotGene function (also included in latest version of liger)
 plotGene <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 'dataset', 
                      methylation.indices = NULL, plot.by = 'dataset', set.dr.lims = F, 
                      pt.size = 0.1, min.clip = NULL, max.clip = NULL, clip.absolute = F, 
@@ -1330,7 +1256,7 @@ plotGene <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 'data
               prevent this.")
     }
     names(min.clip) <- levels(dr_df$plotby)
-    }
+  }
   if (!is.null(max.clip) & is.null(names(max.clip))) {
     if (num_levels > 1) {
       message("Adding names to max.clip according to levels in plot.by group; order may not be 
@@ -1338,7 +1264,7 @@ plotGene <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 'data
               prevent this.")
     }
     names(max.clip) <- levels(dr_df$plotby)
-    }
+  }
   p_list <- list()
   for (sub_df in split(dr_df, f = dr_df$plotby)) {
     # maybe do quantile cutoff here
@@ -1409,7 +1335,7 @@ plotGene <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 'data
       print(plot)
     }
   }
-  }
+}
 
 getGeneValues <- function(list, gene, use.cols = F, methylation.indices = NULL, log2scale = F,
                           scale.factor = 10000) {
@@ -1433,7 +1359,8 @@ getGeneValues <- function(list, gene, use.cols = F, methylation.indices = NULL, 
   return(gene_vals)
 }
 
-# clustering functions 
+###################################################################
+# clustering functions for liger objects
 library(Seurat)
 makeSNN = function (object, dims.use = 1:ncol(object@H.norm), 
                     k.param = 30, prune.SNN = 1/15, print.output = TRUE, 
@@ -1466,7 +1393,7 @@ makeSNN = function (object, dims.use = 1:ncol(object@H.norm),
     cat("Computing nearest neighbor graph\n", file = stderr())
   }
   my.knn <- RANN::nn2(data = data.use, k = k.param, searchtype = "standard", 
-                      eps = nn.eps)
+                eps = nn.eps)
   nn.ranked <- my.knn$nn.idx
   
   if (print.output) {
@@ -1600,6 +1527,8 @@ getClusterCells = function(object, cluster) {
 }
 
 
+
+
 # special plot gene to do both legend and points
 # also change plotting order so that points with positive expression are plotted on top
 plotGene_2020 <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 'dataset', 
@@ -1658,10 +1587,6 @@ plotGene_2020 <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 
   dr_df$gene <- as.numeric(gene_vals[rownames(dr_df)])
   colnames(dr_df) <- c("dr1", "dr2", "gene")
   
-  # put points with no expression in the back
-  dr_df[['back']] = is.na(dr_df$gene)
-  dr_df = dr_df[order(dr_df$back, decreasing = T),]
-  
   # get dr limits for later
   lim1 <- c(min(dr_df$dr1), max(dr_df$dr1))
   lim2 <- c(min(dr_df$dr2), max(dr_df$dr2))
@@ -1674,6 +1599,11 @@ plotGene_2020 <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 
   } else {
     dr_df$plotby <- factor("none")
   }
+  
+  # put points with no expression in the back
+  dr_df[['back']] = is.na(dr_df$gene)
+  dr_df = dr_df[order(dr_df$back, decreasing = T),]
+  
   # expand clip values if only single provided
   num_levels <- length(levels(dr_df$plotby))
   if (length(min.clip) == 1) {
@@ -1691,7 +1621,7 @@ plotGene_2020 <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 
               prevent this.")
     }
     names(min.clip) <- levels(dr_df$plotby)
-    }
+  }
   if (!is.null(max.clip) & is.null(names(max.clip))) {
     if (num_levels > 1) {
       message("Adding names to max.clip according to levels in plot.by group; order may not be 
@@ -1699,7 +1629,7 @@ plotGene_2020 <- function(object, gene, use.raw = F, use.scaled = F, scale.by = 
               prevent this.")
     }
     names(max.clip) <- levels(dr_df$plotby)
-    }
+  }
   p_list <- list()
   for (sub_df in split(dr_df, f = dr_df$plotby)) {
     # maybe do quantile cutoff here
